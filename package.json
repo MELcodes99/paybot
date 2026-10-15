@@ -4,17 +4,21 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "tsx tests/units.test.ts && tsx tests/transfer-check.test.ts && tsx tests/flow.test.ts && tsx tests/mcp-smoke.test.ts",
+    "mcp": "tsx mcp.ts",
+    "login": "tsx scripts/login.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@paybox-sh/sdk": "^2.2.0",
     "@solana/web3.js": "^1.99.0",
     "dotenv": "^18.0.8",
     "tsx": "^4.23.15",
-    "tweetnacl": "^1.0.3"
+    "tweetnacl": "^1.0.3",
+    "zod": "^4.6.7"
   }
 }

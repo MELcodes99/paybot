@@ -4,3 +4,6 @@ node_modules/
 .paj-session.json
 sent-requests.json
 .DS_Store
+payouts.json
+payouts.json.tmp
+!.env.example
