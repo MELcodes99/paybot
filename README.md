@@ -4,6 +4,7 @@
 USDC on Solana in. Naira in a real Nigerian bank account out, in seconds. The bank confirms who owns the account before anyone pays.
 
 - Live service: **https://paybot-562g.onrender.com**
+- Telegram bot: **PAYBOT_TELEGRAM_LINK**
 - Agent contract: [`/openapi.json`](https://paybot-562g.onrender.com/openapi.json) and [`/llms.txt`](https://paybot-562g.onrender.com/llms.txt)
 - Built for the [PayBox](https://paybox.sh) marketplace on x402. Payouts by [PAJ Cash](https://paj.cash).
 
@@ -15,15 +16,16 @@ USDC on Solana in. Naira in a real Nigerian bank account out, in seconds. The ba
 2. [The problem it fixes](#the-problem-it-fixes)
 3. [How it works](#how-it-works)
 4. [Proven with real money](#proven-with-real-money)
-5. [For agents: quick start](#for-agents-quick-start)
-6. [API reference](#api-reference)
-7. [Safety model](#safety-model)
-8. [Costs](#costs)
-9. [Use PayBot inside Claude Code](#use-paybot-inside-claude-code)
-10. [Run your own PayBot](#run-your-own-paybot)
-11. [Project layout](#project-layout)
-12. [Tests](#tests)
-13. [Limits and roadmap](#limits-and-roadmap)
+5. [Use PayBot on Telegram](#use-paybot-on-telegram)
+6. [For agents: quick start](#for-agents-quick-start)
+7. [API reference](#api-reference)
+8. [Safety model](#safety-model)
+9. [Costs](#costs)
+10. [Use PayBot inside Claude Code](#use-paybot-inside-claude-code)
+11. [Run your own PayBot](#run-your-own-paybot)
+12. [Project layout](#project-layout)
+13. [Tests](#tests)
+14. [Limits and roadmap](#limits-and-roadmap)
 
 ---
 
@@ -37,10 +39,11 @@ You tell your agent something like:
 
 and PayBot handles the rest: it finds the bank, asks the bank who owns that account, works out exactly how much USDC is needed at the live rate, waits for you to confirm the name, and then the naira lands in the account, usually within seconds.
 
-PayBot comes in two forms, built on the same core:
+PayBot comes in three forms, built on the same core:
 
 | Form | Who it is for | How it is used |
 |---|---|---|
+| **Telegram bot** | Anyone with a PayBox wallet and Telegram | Connect your PayBox wallet once with `/connect`, then send naira in one message and tap Confirm |
 | **Hosted x402 service** | Any agent with a PayBox wallet (or any x402 client) | Call `POST /prepare`, pay $0.01, then pay the USDC with the agent's own wallet |
 | **Claude Code tools** | Someone running Claude Code on their own computer with a PayBox wallet | Type a plain-English request in Claude Code; PayBot does the whole flow |
 
@@ -66,19 +69,23 @@ PayBot fixes all four:
 
 ## How it works
 
-Agent (PayBox wallet) PayBot (this service) PAJ Cash Bank
+```
+  Agent (PayBox wallet)            PayBot (this service)              PAJ Cash            Bank
+  ---------------------            ---------------------              --------            ----
+  1. POST /prepare  ---------->    find bank, verify account  ------> name check
+     pays $0.01 (x402)             create payout order        ------> one-off Solana
+                                                                      deposit address
+                     <----------   verified name, exact USDC,
+                                   address, status link
 
-POST /prepare ----------> find bank, verify account ------> name check
-pays $0.01 (x402) create payout order ------> one-off Solana
-deposit address
-<---------- verified name, exact USDC,
-address, status link
-Show the person the verified name and cost. Wait for “yes”.
-request_transfer -------------------------------------------> USDC arrives
-(agent’s own wallet, Solana USDC, exact amount) converts at
-live rate ------> naira paid
-Poll status link ----------> PAJ order status
-<---------- PROCESSING ... COMPLETED
+  2. Show the person the verified name and cost. Wait for "yes".
+
+  3. request_transfer  ------------------------------------------->  USDC arrives
+     (agent's own wallet, Solana USDC, exact amount)                 converts at
+                                                                     live rate  ------> naira paid
+  4. Poll status link  ---------->  PAJ order status
+                     <----------   PROCESSING ... COMPLETED
+```
 
 1. **Prepare.** The agent sends the bank name, the 10-digit account number, the naira amount and (ideally) the recipient's name. PayBot finds the bank among 900+ Nigerian banks and fintechs, asks the bank who owns the account, and creates a payout order with PAJ. It returns the bank-verified name, the exact USDC to pay, the Solana address to pay it to, and a private status link. This step costs $0.01, paid over x402.
 2. **Confirm.** The agent shows the person the verified name, bank, account number, naira amount and USDC cost, and waits for an explicit yes.
@@ -87,15 +94,101 @@ Poll status link ----------> PAJ order status
 
 ## Proven with real money
 
-These payouts were made on Solana mainnet into a real Opay account while building PayBot:
+These payouts were made on Solana mainnet into real Nigerian accounts while building PayBot:
 
 | Path | Amount | USDC | Result |
 |---|---|---|---|
 | First spike: PAJ order paid from a PayBox wallet, signed on a Mac | N1,500 | 1.10 | Credited 3 seconds after Solana confirmation |
 | Claude Code: one plain-English request, confirmed by the user | N1,500 | 1.10 | `COMPLETED`, credited |
 | Live hosted service: an agent paid $0.01 to `/prepare`, then paid the USDC itself | N2,000 | 1.47 | `PROCESSING` to `COMPLETED` in 7 seconds, credited |
+| Telegram bot: a one-line `/send` to a Palmpay account, Confirm tapped, signed by the user's own PayBox wallet | N1,000 | 0.73 | "Done" with the Solscan link within seconds, credited to Palmpay |
+
+On the Telegram run, the first attempt used a shortened name. The bank returned the full name, PayBot refused and created nothing, and the retry with the full name went through.
 
 The recipient sees the payout on their bank statement with a remark ending in **"PayBot payout"**.
+
+## Use PayBot on Telegram
+
+The Telegram bot is the simplest way to use PayBot. There is nothing to install. Each person connects **their own** PayBox wallet, and every payout is paid from that wallet. PayBot never holds anyone's money.
+
+**You need**
+- Telegram
+- A [PayBox](https://paybox.sh) account with a Solana wallet holding USDC and a little SOL for network fees (about 0.003 SOL covers a payout)
+
+### 1. Connect your PayBox wallet (once, about a minute)
+
+Open **PAYBOT_TELEGRAM_LINK**, tap **Start**, then send:
+
+```
+/connect
+```
+
+- **Step 1 of 2:** tap **Open PayBox**, sign in, check that the code on the page matches the code in the chat, and allow your Solana wallet.
+- **Step 2 of 2:** the bot shows you 8 emoji. Tap **Open PayBox** and pick the same 8 emoji. If they do not match exactly, do not approve. This is what lets PayBot sign your payouts.
+
+When it is done the bot replies:
+
+```
+Connected. Wallet 3YWr...kZ8M: 1.33 USDC, 0.026 SOL.
+```
+
+### 2. Send naira in one message
+
+Write it the way you would say it. All of these work:
+
+```
+send 5000 to GTBank 0123456789 Tunde Bakare
+/send 20k Opay 8012345678 Ada Okafor
+pay Ada Okafor 2,500 on Opay 8012345678
+Send 5,000 naira to Moniepoint 801 234 5678, Tunde Bakare
+```
+
+Amounts can be written as `5000`, `5,000`, `N5000`, `₦5000` or `5k`. Spaces in the account number are fine.
+
+### 3. Check the name, then tap Confirm
+
+The bot asks the bank who owns the account and shows you:
+
+```
+TUNDE BAKARE
+Guaranty Trust Bank 0123456789
+
+N5,000 for 3.69 USDC
+
+Is this the right person?        [ Confirm ]  [ Cancel ]
+```
+
+Nothing moves until you tap **Confirm**. Then:
+
+```
+Done. N5,000 paid to TUNDE BAKARE (Guaranty Trust Bank 0123456789).
+https://solscan.io/tx/...
+```
+
+If you typed a name and the bank says the account belongs to someone else, the bot stops before showing any button:
+
+```
+The bank says PALMPAY 8012345678 belongs to "ADA CHIOMA OKAFOR", not "ada okafor". Nothing was created.
+```
+
+### Commands
+
+| Command | What it does |
+|---|---|
+| `/connect` | Link your PayBox wallet |
+| `/send` | Send naira, for example `/send 5000 GTBank 0123456789 Tunde Bakare` |
+| `/wallet` | Your USDC and SOL balance |
+| `/history` | Your last 5 payouts and their status |
+| `/disconnect` | Delete your PayBox connection from PayBot |
+| `/help` | How PayBot works |
+
+### Good to know
+
+- **Quotes last 15 minutes.** If you tap Confirm later than that, the bot asks you to send the request again for a fresh rate.
+- **PayBox approval.** If your PayBox spending rules ask for approval, the bot says so. Approve the payment in the PayBox app, then tap **Check**.
+- **Private chats only.** The bot will not take payment requests in groups.
+- **Low balance.** If your wallet cannot cover the payout or the network fee, the bot warns you before you confirm.
+- **Leaving.** `/disconnect` deletes your connection. To fully revoke access, also remove **PayBot Telegram** from the Clients screen in the PayBox app.
 
 ## For agents: quick start
 
@@ -121,8 +214,9 @@ The $0.01 can be paid in USDC on Solana or on Base. If the account is invalid or
 
 **Step 2: show the person the `confirm` text and wait for a yes.**
 
+```
 TUNDE BAKARE, Guaranty Trust Bank 0123456789. N5,000 costs 3.69 USDC. Send it?
-
+```
 
 **Step 3: pay exactly what PayBot returned, once.**
 
@@ -275,6 +369,16 @@ It is tested against tampered transactions: wrong amount, wrong recipient, a hid
 - A dropped connection mid-signature does not lead to a second payment.
 - PAJ's status can briefly show `ERROR` before `COMPLETED`. PayBot treats only `COMPLETED` as done and an `ERROR` as "keep watching", never "send again".
 
+**Telegram bot**
+- Each person connects their own PayBox wallet. Payouts are signed with that person's own PayBox key and paid from their own wallet.
+- Connecting uses PayBox's own sign-in and its 8-emoji key pairing, so the person approves PayBot inside the PayBox app.
+- Each connection is encrypted (AES-256-GCM) before it is stored in the database. The key lives only in the server's environment.
+- Only the person who asked for a payout can confirm it. A Confirm tapped by anyone else does nothing.
+- Each person's actions run one at a time, so a double tap can never become two payments, and a payout that has been sent cannot be cancelled or replaced.
+- The database itself refuses to overwrite a payout's recorded PayBox request.
+- The same transaction check as the Claude Code version runs before every signature.
+- Telegram updates are accepted only on a secret path with Telegram's secret header.
+
 **Never holding funds**
 - In the hosted service, agents pay the PAJ address from their own wallet. PayBot only ever receives its $0.01 fee.
 - Secrets (PAJ session, status secret) live only in environment variables, never in the repository.
@@ -358,27 +462,45 @@ The hosted service is a single Node process (`npm start`). On [Render](https://r
 | `PRICE` | Optional, defaults to `$0.01` |
 | `FACILITATOR_URL` | Optional, defaults to `https://facilitator.payai.network` |
 
+**To add the Telegram bot**, create a bot with [@BotFather](https://t.me/BotFather), add a Postgres database (Render Postgres works), and set:
+
+| Variable | Value |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | The token from BotFather |
+| `TELEGRAM_WEBHOOK_SECRET` | Any random string (`openssl rand -hex 16`) |
+| `ENCRYPTION_KEY` | 64 hex characters (`openssl rand -hex 32`). Back it up: if it is lost, every user has to connect again. |
+| `DATABASE_URL` | The database's internal connection URL |
+
+On start, PayBot creates its tables, registers the webhook and sets the bot's command menu. `/health` shows `"telegram":"on"` when the bot is running.
+
 If neither `PAY_TO_SOL` nor `PAY_TO_EVM` is set, `/prepare` runs free (development mode). Free Render services sleep when idle; a ping to `/health` every 10 minutes (for example with cron-job.org) keeps it awake.
 
 ## Project layout
 
-server.ts Hosted x402 service (Hono): /prepare, /status, /banks, /quote, docs
-mcp.ts Claude Code server (MCP over stdio): the six tools above
+```
+server.ts               Hosted x402 service (Hono): /prepare, /status, /banks, /quote, docs, Telegram webhook
+mcp.ts                  Claude Code server (MCP over stdio): the six tools above
 lib/
-config.ts Settings, .env loading, exact USDC base-unit math
-paj.ts PAJ Cash client: session, banks, name check, orders, status
-paybox.ts PayBox side: wallet, balances, request_transfer, checked signing
-transfer-check.ts Decodes and checks a Solana transaction before signing
-sign-plan.ts Signs a PayBox transaction plan with the local agent key
-payout.ts The payout flow: prepare, send, status
-store.ts Local payout record that prevents double sends (payouts.json)
-site.ts OpenAPI contract, llms.txt and landing page
+  config.ts             Settings, .env loading, exact USDC base-unit math
+  paj.ts                PAJ Cash client: session, banks, name check, orders, status
+  paybox.ts             PayBox side: wallet, balances, request_transfer, checked signing
+  transfer-check.ts     Decodes and checks a Solana transaction before signing
+  sign-plan.ts          Signs a PayBox transaction plan with the local agent key
+  payout.ts             The payout flow: prepare, send, status (shared by all three forms)
+  store.ts              Local payout record that prevents double sends (payouts.json)
+  site.ts               OpenAPI contract, llms.txt and landing page
+  telegram.ts           The Telegram bot: connect, send, Confirm/Cancel, wallet, history
+  parse-send.ts         Turns "send 5k to Opay 8012345678 Ada Okafor" into a payout request
+  paybox-connect.ts     Per-user PayBox sign-in, 8-emoji key pairing and token refresh
+  bot-store.ts          Bot users and payouts in Postgres
+  secretbox.ts          Encrypts each user's PayBox connection before storing it
 scripts/
-login.ts PAJ login (emailed code)
-agent-demo.ts Outside-agent demo against the live service
-tests/ 53 checks, no network, no money
-CLAUDE.md Rules for Claude Code when using PayBot
-
+  login.ts              PAJ login (emailed code)
+  agent-demo.ts         Outside-agent demo against the live service
+  connect-spike.ts      Connects a PayBox account the way the bot does, from the terminal
+tests/                  114 checks, no network, no money
+CLAUDE.md               Rules for Claude Code when using PayBot
+```
 
 ## Tests
 
@@ -386,7 +508,7 @@ CLAUDE.md Rules for Claude Code when using PayBot
 npm test
 ```
 
-53 checks, all offline, no money:
+114 checks, all offline, no money:
 
 - **Money math:** exact USDC base units, no floating point drift.
 - **Name matching:** word order, case and punctuation ignored; different people refused.
@@ -394,6 +516,10 @@ npm test
 - **Full payout flow** against a simulated PAJ, PayBox and Solana: name mismatch, low SOL, a dropped connection mid-signature (no second transfer), PAJ's temporary `ERROR` before `COMPLETED`, and repeat calls after completion.
 - **Hosted service:** every endpoint, status-link privacy, and the x402 paywall (correct `402`, both networks, discovery info, public https address, and PAJ never touched before payment).
 - **Claude Code server:** starts like Claude Code launches it, exposes the six tools, refuses unknown payouts.
+- **Telegram bot:** a full simulated conversation: refuses before `/connect` and in groups, the connect steps and emoji, encrypted storage, name mismatch, Confirm from a stranger ignored, expired quotes, cancel after sending refused, approval flow, history and disconnect.
+- **Message parsing:** the ways people write a send request, including `20k`, `N5,000`, spaced account numbers and the name before the amount.
+- **Database:** the Postgres code run against a real in-process Postgres: encryption at rest, per-user history, and refusing to replace a recorded PayBox request.
+- **Webhook:** updates without Telegram's secret header are rejected.
 
 ## Limits and roadmap
 
@@ -401,10 +527,10 @@ npm test
 - Naira (NGN) payouts only, into Nigerian bank and fintech accounts.
 - The payout leg is Solana USDC only, because PAJ's payout addresses are on Solana. The $0.01 fee can be paid on Solana or Base.
 - Payouts run on the operator's PAJ business account.
+- The Telegram bot pays from Solana wallets only, for the same reason.
 - Listing in the public x402 catalogs (Coinbase Bazaar, pay.sh) normally requires 10 or more different paying wallets within 30 days. Until then, agents can use PayBot directly by URL.
 
 **Next**
-- A **Telegram bot** front end: connect your own PayBox wallet once, then `/send 20000 GTBank 0123456789` with Confirm and Cancel buttons.
 - More PAJ currencies (Ghana cedi, Kenyan shilling, Tanzanian shilling, South African rand).
 - Saved recipients and per-day limits for the hosted service.
 
