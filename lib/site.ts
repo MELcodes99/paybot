@@ -7,7 +7,8 @@ const GUIDANCE = (base: string, price: string) =>
   `If expectedName is given and the bank's name differs, it returns 422 and you are not charged. ` +
   `(2) Show the user the response's confirm text (verified name, bank, account number, naira, USDC) and wait for an explicit yes. Never pay without it. ` +
   `(3) Pay with PayBox request_transfer {credential_id: your Solana wallet, chain: "solana:mainnet", to: pay.to, amount: pay.amount, token: "${USDC_MINT}"}, exactly once, within 15 minutes. Poll get_request with the same request_id; never re-call request_transfer. ` +
-  `(4) Poll statusUrl until status is COMPLETED. ERROR can be temporary: keep polling, never pay again. ` +
+  `(4) Check statusUrl until status is COMPLETED, using PayBox use_service with mode "probe" (free, live, never cached; plain web readers may show a stale page). ERROR can be temporary: keep checking, never pay again. ` +
+  `Users usually ask in one line, e.g. "Send 5,000 naira to GTBank 0123456789, Tunde Bakare": map it to bank "GTBank", accountNumber "0123456789", ngn 5000, expectedName "Tunde Bakare". ` +
   `Free helpers: GET ${base}/banks?search=opay and GET ${base}/quote?ngn=5000. The paying wallet needs about 0.0021 SOL for network fees.`;
 
 export function openApi(base: string, price: string) {
@@ -113,7 +114,15 @@ export function llmsTxt(base: string, price: string) {
 2. Show the user the response's "confirm" text: bank-verified name, bank, account number, naira and USDC. Wait for an explicit yes.
 3. request_transfer({ credential_id: <your Solana wallet>, chain: "solana:mainnet", to: pay.to, amount: pay.amount, token: "${USDC_MINT}" })
    Once. Within 15 minutes. Poll get_request with the same request_id; never call request_transfer again for this payout.
-4. Poll statusUrl until "status" is "COMPLETED". "ERROR" can be temporary: keep polling, never pay again.
+4. Check statusUrl until "status" is "COMPLETED":
+   use_service({ credential_id, url: <statusUrl>, method: "GET", mode: "probe" })
+   Probe mode is free and live. Plain web readers can show a cached, out-of-date status.
+   "ERROR" can be temporary: keep checking, never pay again.
+
+## How people ask
+"Send 5,000 naira to GTBank 0123456789, Tunde Bakare"
+-> bank: "GTBank", accountNumber: "0123456789", ngn: 5000, expectedName: "Tunde Bakare"
+Also common: "Pay Ada Okafor 20k on Opay 8012345678" (20k = 20000).
 
 ## Free helpers
 - GET ${base}/banks?search=opay

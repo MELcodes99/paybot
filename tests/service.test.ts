@@ -42,6 +42,7 @@ let r = await post({ bank: "GTBank", accountNumber: "0123456789", ngn: 5000, exp
 const prep: any = await r.json();
 check("POST /prepare returns verified name and exact payment", r.status === 200 && prep.recipient.accountName === "TUNDE BAKARE" && prep.pay.amount === "3690000" && prep.pay.to === PAJ_ADDR && prep.pay.token === USDC, prep.confirm);
 check("prepare tells the agent how to pay with PayBox", prep.paybox.tool === "request_transfer" && prep.paybox.args.amount === "3690000");
+check("prepare tells the agent how to check status live (PayBox probe)", prep.statusCheck?.tool === "use_service" && prep.statusCheck?.mode === "probe" && prep.statusCheck?.url === prep.statusUrl);
 
 r = await post({ bank: "GTBank", accountNumber: "0123456789", ngn: 5000, expectedName: "Someone Else" });
 const mism: any = await r.json();
@@ -53,6 +54,7 @@ check("bad body is a 400 with an example", r.status === 400 && !!(await r.json()
 r = await call(new URL(prep.statusUrl).pathname + new URL(prep.statusUrl).search);
 const st: any = await r.json();
 check("status link works", r.status === 200 && st.status === "INIT" && st.done === false, st.note);
+check("status is never cached", (r.headers.get("cache-control") ?? "").includes("no-store"), r.headers.get("cache-control") ?? "none");
 
 r = await call(`/status/${prep.payoutId}?token=wrong`);
 check("status needs the right token", r.status === 404);
@@ -74,7 +76,9 @@ const spec: any = await r.json();
 check("openapi.json has x-guidance and x-payment-info", spec.openapi === "3.1.0" && spec.info["x-guidance"].includes("request_transfer") && spec.paths["/prepare"].post["x-payment-info"].price.amount === "0.010000" && spec.servers[0].url === "https://paybot.example");
 
 r = await call("/llms.txt");
-check("llms.txt explains the flow", r.status === 200 && (await r.text()).includes("explicit yes"));
+const llms = await r.text();
+check("llms.txt explains the flow", r.status === 200 && llms.includes("explicit yes"));
+check("llms.txt shows the one-line request format and probe status checks", llms.includes("Send 5,000 naira to GTBank 0123456789, Tunde Bakare") && llms.includes('mode: "probe"'));
 r = await call("/");
 const html = await r.text();
 check("landing page renders", r.status === 200 && html.includes("Send naira from any agent wallet") && !html.includes("—"));

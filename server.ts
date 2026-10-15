@@ -117,6 +117,7 @@ app.post("/prepare", async (c) => {
     const p = await createPayout(parsed.data);
     const amount = toBaseUnits(p.usdc).toString();
     const naira = `N${p.ngn.toLocaleString("en-NG")}`;
+    const statusUrl = `${BASE}/status/${p.payoutId}?token=${statusToken(p.payoutId)}`;
     return c.json({
       payoutId: p.payoutId,
       status: "awaiting_payment",
@@ -134,9 +135,10 @@ app.post("/prepare", async (c) => {
         "Show the user the confirm text and pay only after an explicit yes.",
         "Pay exactly pay.amount of USDC on Solana to pay.to, once. Never pay this payoutId twice.",
         "Pay within 15 minutes. If later, call /prepare again for a fresh payout.",
-        "After paying, poll statusUrl until status is COMPLETED. ERROR can be temporary; keep polling, do not pay again.",
+        "After paying, check statusUrl with PayBox use_service in probe mode (free, live) until status is COMPLETED. ERROR can be temporary; keep checking, do not pay again.",
       ],
-      statusUrl: `${BASE}/status/${p.payoutId}?token=${statusToken(p.payoutId)}`,
+      statusUrl,
+      statusCheck: { tool: "use_service", mode: "probe", method: "GET", url: statusUrl, note: "Free and live (no payment, no cache). Repeat every few seconds until status is COMPLETED." },
     });
   } catch (e: any) {
     // 422 means the request was understood but cannot be paid out; x402 cancels the charge on any 4xx.
@@ -145,6 +147,10 @@ app.post("/prepare", async (c) => {
 });
 
 // ---------- Free: status, banks, quote ----------
+
+// Status and rates change by the second: never let a browser, proxy or agent web reader cache them.
+app.use("/status/*", async (c, next) => { await next(); c.header("Cache-Control", "no-store, max-age=0"); });
+app.use("/quote", async (c, next) => { await next(); c.header("Cache-Control", "no-store, max-age=0"); });
 
 app.get("/status/:id", async (c) => {
   const id = c.req.param("id");
