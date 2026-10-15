@@ -10,6 +10,16 @@ import {
 } from "./paybox.ts";
 import { getPayout, savePayout, type Payout } from "./store.ts";
 
+// Who is paying, and where their payout records live. Claude Code uses this Mac's PayBox and
+// payouts.json; the Telegram bot passes each user's own PayBox client and the database.
+export type PayoutStore = {
+  get(id: string): Promise<Payout | undefined> | Payout | undefined;
+  save(p: Payout): Promise<void> | void;
+};
+export type PayoutContext = { client: any; store: PayoutStore };
+export const fileStore: PayoutStore = { get: getPayout, save: savePayout };
+
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const naira = (n: number) => `N${n.toLocaleString("en-NG")}`;
 const PAYBOX_WAIT_MS = 120_000;
@@ -78,13 +88,14 @@ export async function prepare(a: { bank: string; accountNumber: string; ngn: num
 }
 
 // Step 2. Moves real money. Safe to call again with the same payoutId: it resumes, never re-sends.
-export async function send(a: { payoutId: string; confirmedAccountName: string }) {
-  const p = getPayout(a.payoutId);
+export async function send(a: { payoutId: string; confirmedAccountName: string }, ctx?: PayoutContext) {
+  const store = ctx?.store ?? fileStore;
+  const p = await store.get(a.payoutId);
   if (!p) throw new Error("Unknown payoutId. Call prepare_payout first.");
   if (!sameName(a.confirmedAccountName, p.accountName)) {
     throw new Error(`Confirmed name "${a.confirmedAccountName}" does not match the bank-verified name "${p.accountName}". Not sending.`);
   }
-  const client = await paybox();
+  const client = ctx?.client ?? await paybox();
   const w = await solanaWallet(client);
   const token = loadSession();
 
@@ -107,29 +118,29 @@ export async function send(a: { payoutId: string; confirmedAccountName: string }
       return { status: "not_sent", moneyMoved: false, say: `PayBox could not prepare the transfer: ${res?.message ?? "no reason given"}. No funds were moved.` };
     }
     p.requestId = res.request_id; p.requestedAt = new Date().toISOString(); p.payboxStatus = res.status;
-    savePayout(p);
+    await store.save(p);
   }
-  return finish(client, token, w.address, p);
+  return finish(client, store, token, w.address, p);
 }
 
-async function finish(client: any, token: string, sender: string, p: Payout) {
-  let req = await client.getRequest(p.requestId);
+async function finish(client: any, store: PayoutStore, token: string, sender: string, p: Payout) {
+  const req = await client.getRequest(p.requestId);
   if (req.status === "pending_approval") {
-    p.payboxStatus = req.status; savePayout(p);
+    p.payboxStatus = req.status; await store.save(p);
     return { status: "needs_approval", payoutId: p.payoutId, say: "PayBox wants your approval for this transfer. Approve it in the PayBox app, then call send_naira again with the same payoutId." };
   }
   // Sign if PayBox is waiting. A request is a single transfer, so signing it again is only allowed
   // when an earlier signature clearly never landed (still waiting 2+ minutes later), as the SDK does.
   const staleSignature = p.signedAt && Date.now() - new Date(p.signedAt).getTime() > 120_000;
   if (req.status === "pending_signature" && (!p.signedAt || staleSignature)) {
-    await signPendingTransfer(client, p.requestId!, { sender, recipient: p.address, amountBaseUnits: toBaseUnits(p.usdc) }, () => {
-      p.signedAt = new Date().toISOString(); savePayout(p);
+    await signPendingTransfer(client, p.requestId!, { sender, recipient: p.address, amountBaseUnits: toBaseUnits(p.usdc) }, async () => {
+      p.signedAt = new Date().toISOString(); await store.save(p);
     });
   }
   const final = await client.waitForRequest(p.requestId, { intervalMs: 3000, timeoutMs: PAYBOX_WAIT_MS });
   p.payboxStatus = final.status;
   p.txHash = final.output?.value?.tx_hash ?? p.txHash;
-  savePayout(p);
+  await store.save(p);
   if (final.status === "denied" || final.status === "error") {
     return { status: "failed", payoutId: p.payoutId, payboxStatus: final.status, error: final.error ?? null,
       say: `PayBox reports the transfer ${final.status}. Do not resend. Check payout_status.` };
@@ -143,7 +154,7 @@ async function finish(client: any, token: string, sender: string, p: Payout) {
   let o: any;
   for (;;) {
     o = await getTransaction(token, p.payoutId);
-    p.pajStatus = o.status; savePayout(p);
+    p.pajStatus = o.status; await store.save(p);
     if (o.status === "COMPLETED" || Date.now() > deadline) break;
     await sleep(5000);
   }
@@ -159,19 +170,20 @@ async function finish(client: any, token: string, sender: string, p: Payout) {
   };
 }
 
-export async function status(payoutId: string) {
-  const p = getPayout(payoutId);
+export async function status(payoutId: string, ctx?: PayoutContext) {
+  const store = ctx?.store ?? fileStore;
+  const p = await store.get(payoutId);
   if (!p) throw new Error("Unknown payoutId.");
   const token = loadSession();
   const o = await getTransaction(token, payoutId);
   p.pajStatus = o.status;
   if (p.requestId) {
-    const client = await paybox();
+    const client = ctx?.client ?? await paybox();
     const r = await client.getRequest(p.requestId);
     p.payboxStatus = r.status;
     p.txHash = r.output?.value?.tx_hash ?? p.txHash;
   }
-  savePayout(p);
+  await store.save(p);
   const hint = !p.requestId
     ? "Prepared but not sent."
     : p.payboxStatus === "pending_signature" && !p.signedAt

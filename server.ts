@@ -16,6 +16,9 @@ import { USDC_MINT, toBaseUnits } from "./lib/config.ts";
 import { getTransaction, loadSession } from "./lib/paj.ts";
 import { banks, createPayout, quote } from "./lib/payout.ts";
 import { landingPage, llmsTxt, openApi } from "./lib/site.ts";
+import { webhookCallback } from "grammy";
+import { postgresStore } from "./lib/bot-store.ts";
+import { createPaybot } from "./lib/telegram.ts";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const BASE = (process.env.PUBLIC_URL ?? `http://localhost:${PORT}`).replace(/\/$/, "");
@@ -188,11 +191,38 @@ app.get("/quote", async (c) => {
 app.get("/", (c) => c.html(landingPage(BASE, PRICE)));
 app.get("/llms.txt", (c) => c.text(llmsTxt(BASE, PRICE)));
 app.get("/openapi.json", (c) => c.json(openApi(BASE, PRICE)));
-app.get("/health", (c) => c.json({ ok: true, service: "paybot", paid, facilitator: USE_CDP ? "coinbase-cdp" : FACILITATOR, networks: [PAY_TO_SOL && SVM_NET, PAY_TO_EVM && EVM_NET].filter(Boolean) }));
+app.get("/health", (c) => c.json({ ok: true, service: "paybot", paid, telegram, facilitator: USE_CDP ? "coinbase-cdp" : FACILITATOR, networks: [PAY_TO_SOL && SVM_NET, PAY_TO_EVM && EVM_NET].filter(Boolean) }));
+
+// ---------- Telegram bot (only when its settings exist) ----------
+
+const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN?.trim();
+const TG_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
+const DB_URL = process.env.DATABASE_URL?.trim();
+let telegram = "off";
+if (TG_TOKEN && TG_SECRET && DB_URL && process.env.PAYBOT_NO_LISTEN !== "1") {
+  try {
+    const bot = createPaybot(TG_TOKEN, { store: await postgresStore(DB_URL) });
+    // Secret path plus Telegram's secret header: only Telegram can deliver updates.
+    app.post(`/telegram/${TG_SECRET}`, webhookCallback(bot, "hono", { secretToken: TG_SECRET, timeoutMilliseconds: 25_000 }));
+    await bot.api.setWebhook(`${BASE}/telegram/${TG_SECRET}`, { secret_token: TG_SECRET, drop_pending_updates: false, allowed_updates: ["message", "callback_query"] });
+    await bot.api.setMyCommands([
+      { command: "connect", description: "Link your PayBox wallet" },
+      { command: "send", description: "Send naira: /send 5000 GTBank 0123456789 Name" },
+      { command: "wallet", description: "Your balance" },
+      { command: "history", description: "Your recent payouts" },
+      { command: "disconnect", description: "Remove your PayBox connection" },
+      { command: "help", description: "How PayBot works" },
+    ]);
+    telegram = "on";
+  } catch (e: any) {
+    telegram = "error";
+    console.error("[paybot] Telegram bot failed to start:", e.message);
+  }
+}
 
 if (!SECRET) console.warn("[paybot] STATUS_SECRET not set: status links will not work.");
 if (process.env.PAYBOT_NO_LISTEN !== "1") {
-  serve({ fetch: app.fetch, port: PORT }, () => console.log(`[paybot] ${BASE} (x402 ${paid ? "ON" : "OFF"}, facilitator ${USE_CDP ? "coinbase-cdp" : FACILITATOR})`));
+  serve({ fetch: app.fetch, port: PORT }, () => console.log(`[paybot] ${BASE} (x402 ${paid ? "ON" : "OFF"}, facilitator ${USE_CDP ? "coinbase-cdp" : FACILITATOR}, telegram ${telegram})`));
 }
 
 export { app, statusToken };

@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsx tests/units.test.ts && tsx tests/transfer-check.test.ts && tsx tests/paybox-client.test.ts && tsx tests/connect.test.ts && tsx tests/flow.test.ts && tsx tests/service.test.ts && tsx tests/paywall.test.ts && tsx tests/cdp-facilitator.test.ts && tsx tests/mcp-smoke.test.ts",
+    "test": "tsx tests/units.test.ts && tsx tests/transfer-check.test.ts && tsx tests/paybox-client.test.ts && tsx tests/connect.test.ts && tsx tests/flow.test.ts && tsx tests/service.test.ts && tsx tests/paywall.test.ts && tsx tests/cdp-facilitator.test.ts && tsx tests/mcp-smoke.test.ts && tsx tests/parse-send.test.ts && tsx tests/bot-store.test.ts && tsx tests/telegram.test.ts && tsx tests/webhook.test.ts",
     "mcp": "tsx mcp.ts",
     "login": "tsx scripts/login.ts",
     "start": "tsx server.ts",
@@ -26,12 +26,18 @@
     "@x402/hono": "^2.28.0",
     "@x402/svm": "^2.28.0",
     "dotenv": "^18.0.8",
+    "grammy": "^1.46.0",
     "hono": "^4.13.13",
+    "pg": "^8.23.1",
     "tsx": "^4.23.15",
     "tweetnacl": "^1.0.3",
     "zod": "^4.6.7"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.10",
+    "@types/pg": "^8.23.1"
   }
 }

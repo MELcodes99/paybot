@@ -72,7 +72,7 @@ export async function requestTransfer(client: any, a: { credentialId: string; to
 }
 
 // Fetch the transaction PayBox wants signed, check it, refresh it, check again, sign once.
-export async function signPendingTransfer(client: any, requestId: string, expect: Expect, beforeSubmit: () => void) {
+export async function signPendingTransfer(client: any, requestId: string, expect: Expect, beforeSubmit: () => void | Promise<void>) {
   const reopened = toolJson(await client.mcp.callTool("reopen_signing_window", { request_id: requestId }, "in-process"));
   if (reopened?.request_id !== requestId) throw new Error("PayBox returned a different request. Not signing.");
   if (reopened.status !== "pending_signature") return { signed: false, status: reopened.status, notes: [] as string[] };
@@ -85,7 +85,7 @@ export async function signPendingTransfer(client: any, requestId: string, expect
   const now = await client.getRequest(requestId);
   if (now.status !== "pending_signature") return { signed: false, status: now.status, notes };
   const envelopes = buildEnvelopes(plan, client.signingCreds());
-  beforeSubmit();
+  await beforeSubmit();
   await client.poster(`/agent/requests/${requestId}/envelopes`, { envelopes });
   return { signed: true, status: "submitted", notes };
 }
