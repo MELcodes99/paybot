@@ -1,0 +1,12 @@
+import "dotenv/config";
+import { readFileSync } from "node:fs";
+const BASE = process.env.PAJ_BASE_URL ?? "https://api.paj.cash";
+const { token } = JSON.parse(readFileSync(".paj-session.json", "utf8"));
+const res = await fetch(BASE + "/pub/bank", { headers: { Authorization: `Bearer ${token}` } });
+const data: any = await res.json();
+console.log("Status:", res.status);
+console.log("Type:", Array.isArray(data) ? `list of ${data.length}` : typeof data);
+console.log("Top-level keys:", Array.isArray(data) ? "(it's a list)" : Object.keys(data));
+const list = Array.isArray(data) ? data : (data.data ?? data.banks ?? data.items ?? []);
+console.log("First 3 entries:", JSON.stringify(list.slice(0, 3), null, 2));
+console.log("Opay-looking entries:", JSON.stringify(list.filter((b: any) => JSON.stringify(b).toLowerCase().includes("opay")), null, 2));

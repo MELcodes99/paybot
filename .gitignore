@@ -1,0 +1,6 @@
+node_modules/
+.env
+.env.*
+.paj-session.json
+sent-requests.json
+.DS_Store
