@@ -45,6 +45,8 @@ function readSaved() {
 
 // Non-interactive: used by the Claude Code server, which can't ask for a code.
 export function loadSession(): string {
+  // Hosted service: the session token comes from an environment variable (no file, no code prompt).
+  if (process.env.PAJ_SESSION_TOKEN) return process.env.PAJ_SESSION_TOKEN.trim();
   const saved = readSaved();
   if (saved.token && saved.expiresAt && new Date(saved.expiresAt).getTime() > Date.now() + 60_000) return saved.token;
   throw new Error("PAJ login needed. In Terminal, inside the paybot folder, run: npm run login");

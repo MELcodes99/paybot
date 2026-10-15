@@ -35,7 +35,8 @@ export async function wallet() {
 }
 
 // Step 1. Verifies the account with the bank and creates a PAJ order. Moves no money.
-export async function prepare(a: { bank: string; accountNumber: string; ngn: number; expectedName?: string }) {
+// Used by the Claude Code server (which then records it locally) and by the hosted service.
+export async function createPayout(a: { bank: string; accountNumber: string; ngn: number; expectedName?: string }): Promise<Payout> {
   const accountNumber = a.accountNumber.replace(/\D/g, "");
   if (!Number.isInteger(a.ngn) || a.ngn <= 0) throw new Error("Naira amount must be a whole number above 0.");
   if (settings.maxNgn && a.ngn > settings.maxNgn) throw new Error(`${naira(a.ngn)} is above your PAYBOT_MAX_NGN cap of ${naira(settings.maxNgn)}.`);
@@ -52,11 +53,16 @@ export async function prepare(a: { bank: string; accountNumber: string; ngn: num
   if (order.mint !== USDC_MINT) throw new Error("PAJ returned a non-USDC order.");
   if (Number(order.fiatAmount) !== a.ngn) throw new Error(`PAJ order is for ${order.fiatAmount}, not ${a.ngn}.`);
   if (!order.address || !(Number(order.amount) > 0)) throw new Error("PAJ order is missing an address or amount.");
-  const p: Payout = {
+  return {
     payoutId: order.id, bank: { id: bank.id, name: bank.name }, accountNumber, accountName: acct.accountName,
     ngn: a.ngn, usdc: Number(order.amount), rate: order.rate, fee: order.fee, address: order.address,
     createdAt: new Date().toISOString(),
   };
+}
+
+export async function prepare(a: { bank: string; accountNumber: string; ngn: number; expectedName?: string }) {
+  const p = await createPayout(a);
+  const accountNumber = p.accountNumber;
   savePayout(p);
   return {
     payoutId: p.payoutId,
