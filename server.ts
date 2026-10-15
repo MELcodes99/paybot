@@ -72,6 +72,8 @@ if (paid) {
   app.use(paymentMiddleware({
     "POST /prepare": {
       accepts,
+      // Behind Render's proxy the app sees http://; advertise the real public https address.
+      ...(process.env.PUBLIC_URL ? { resource: `${BASE}/prepare` } : {}),
       description: "PayBot: prepare a naira payout to any Nigerian bank account. Returns the bank-verified account name and the exact Solana USDC amount and address to pay. Show the name to the user and get a yes before paying.",
       mimeType: "application/json",
       extensions: declareDiscoveryExtension({

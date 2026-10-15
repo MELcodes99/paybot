@@ -34,6 +34,7 @@ const base = pr?.accepts?.find((a: any) => a.network === "eip155:8453");
 check("402 offers Solana USDC $0.01 to your wallet", sol?.amount === "10000" && sol?.payTo === process.env.PAY_TO_SOL && sol?.asset === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", JSON.stringify(sol ?? pr ?? {}).slice(0, 160));
 check("402 offers Base USDC $0.01 to your wallet", base?.amount === "10000" && base?.payTo === process.env.PAY_TO_EVM);
 check("402 carries the bazaar discovery info", !!pr?.extensions?.bazaar, Object.keys(pr?.extensions ?? {}).join(","));
+check("402 advertises the public https address", pr?.resource?.url === "https://paybot.example/prepare", pr?.resource?.url);
 check("PAJ is never touched before payment", pajCalls === 0);
 const free = await app.request("/openapi.json");
 check("free routes stay free", free.status === 200);
