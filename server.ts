@@ -2,6 +2,7 @@
 // The agent pays $0.01 to prepare a payout, shows the user the bank-verified name, then pays the
 // USDC itself with PayBox request_transfer. PayBot never holds anyone's keys or funds.
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { createFacilitatorConfig } from "@coinbase/x402";
 import { serve } from "@hono/node-server";
 import { HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
@@ -23,7 +24,15 @@ const EVM_NET = process.env.X402_EVM_NETWORK ?? "eip155:8453";
 const SVM_NET = process.env.X402_SVM_NETWORK ?? "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
 const PAY_TO_EVM = process.env.PAY_TO_EVM?.trim();
 const PAY_TO_SOL = process.env.PAY_TO_SOL?.trim();
-const FACILITATOR = process.env.FACILITATOR_URL ?? "https://facilitator.payai.network";
+// Coinbase's (CDP) facilitator when its API key is set: payments settled there get PayBot indexed
+// in the CDP Bazaar, which PayBox searches. Otherwise fall back to a public facilitator.
+const CDP_KEY_ID = process.env.CDP_API_KEY_ID?.trim();
+const CDP_KEY_SECRET = process.env.CDP_API_KEY_SECRET?.trim();
+const USE_CDP = Boolean(CDP_KEY_ID && CDP_KEY_SECRET);
+const FACILITATOR = USE_CDP ? "cdp" : process.env.FACILITATOR_URL ?? "https://facilitator.payai.network";
+// Plain description of what the endpoint does (CDP rejects descriptions over 500 characters,
+// and the Bazaar delists metadata that reads as instructions to agents).
+const DESCRIPTION = "PayBot: naira payouts to Nigerian bank and fintech accounts. Returns the bank-verified account holder name, the exact USDC amount, and the Solana deposit address for the payout. The payout settles in naira, usually within seconds of the USDC arriving.";
 const SECRET = process.env.STATUS_SECRET || process.env.PAJ_API_KEY || "";
 
 const app = new Hono();
@@ -64,7 +73,8 @@ function limited(c: any, perMinute = 30) {
 
 const paid = Boolean(PAY_TO_EVM || PAY_TO_SOL);
 if (paid) {
-  const server = new x402ResourceServer(new HTTPFacilitatorClient({ url: FACILITATOR }));
+  const facilitator = USE_CDP ? createFacilitatorConfig(CDP_KEY_ID, CDP_KEY_SECRET) : { url: FACILITATOR };
+  const server = new x402ResourceServer(new HTTPFacilitatorClient(facilitator));
   server.registerExtension(bazaarResourceServerExtension);
   const accepts: any[] = [];
   if (PAY_TO_SOL) { server.register(SVM_NET as any, new ExactSvmScheme()); accepts.push({ scheme: "exact", price: PRICE, network: SVM_NET, payTo: PAY_TO_SOL }); }
@@ -74,7 +84,7 @@ if (paid) {
       accepts,
       // Behind Render's proxy the app sees http://; advertise the real public https address.
       ...(process.env.PUBLIC_URL ? { resource: `${BASE}/prepare` } : {}),
-      description: "PayBot: prepare a naira payout to any Nigerian bank account. Returns the bank-verified account name and the exact Solana USDC amount and address to pay. Show the name to the user and get a yes before paying.",
+      description: DESCRIPTION,
       mimeType: "application/json",
       extensions: declareDiscoveryExtension({
         bodyType: "json",
@@ -172,11 +182,11 @@ app.get("/quote", async (c) => {
 app.get("/", (c) => c.html(landingPage(BASE, PRICE)));
 app.get("/llms.txt", (c) => c.text(llmsTxt(BASE, PRICE)));
 app.get("/openapi.json", (c) => c.json(openApi(BASE, PRICE)));
-app.get("/health", (c) => c.json({ ok: true, service: "paybot", paid, networks: [PAY_TO_SOL && SVM_NET, PAY_TO_EVM && EVM_NET].filter(Boolean) }));
+app.get("/health", (c) => c.json({ ok: true, service: "paybot", paid, facilitator: USE_CDP ? "coinbase-cdp" : FACILITATOR, networks: [PAY_TO_SOL && SVM_NET, PAY_TO_EVM && EVM_NET].filter(Boolean) }));
 
 if (!SECRET) console.warn("[paybot] STATUS_SECRET not set: status links will not work.");
 if (process.env.PAYBOT_NO_LISTEN !== "1") {
-  serve({ fetch: app.fetch, port: PORT }, () => console.log(`[paybot] ${BASE} (x402 ${paid ? "ON" : "OFF"})`));
+  serve({ fetch: app.fetch, port: PORT }, () => console.log(`[paybot] ${BASE} (x402 ${paid ? "ON" : "OFF"}, facilitator ${USE_CDP ? "coinbase-cdp" : FACILITATOR})`));
 }
 
 export { app, statusToken };
