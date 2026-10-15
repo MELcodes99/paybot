@@ -7,3 +7,4 @@ sent-requests.json
 payouts.json
 payouts.json.tmp
 !.env.example
+agent-demo-payments.json
