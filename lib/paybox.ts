@@ -10,7 +10,9 @@ export const ACCOUNT_RENT_SOL = 0.00204; // creating a USDC account for a new ad
 let clientPromise: Promise<any> | null = null;
 export function usePayboxClientForTests(client: any) { clientPromise = Promise.resolve(client); }
 export function paybox(): Promise<any> {
-  clientPromise ??= (PayboxClient as any).fromConfig().then((c: any) => {
+  // fromConfig() returns the client directly (not a promise); wrapping it also turns setup errors into a rejection.
+  clientPromise ??= Promise.resolve().then(() => {
+    const c: any = (PayboxClient as any).fromConfig();
     if (!c.signingCreds()) throw new Error("No local PayBox signing key. Run: npx @paybox-sh/sdk connect");
     return c;
   });
