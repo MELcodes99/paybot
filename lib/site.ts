@@ -28,7 +28,7 @@ export function openApi(base: string, price: string) {
       "/prepare": {
         post: {
           operationId: "prepare_payout",
-          summary: "Prepare a naira payout (bank-verified name + exact USDC to pay)",
+          summary: "Create a naira payout to a Nigerian bank account",
           description: "Verifies the account with the bank and creates a payout. Returns the bank-verified account name, the exact USDC amount and the Solana address to pay, and a status link. No money moves until the agent pays pay.to. Errors return 422 and are not charged.",
           "x-payment-info": { price: { amount: Number(amount).toFixed(6), currency: "USD", mode: "fixed" }, protocols: [{ x402: {} }], description: "Prepare a naira payout" },
           requestBody: {
@@ -72,9 +72,9 @@ export function openApi(base: string, price: string) {
       "/status/{payoutId}": {
         get: {
           operationId: "payout_status",
-          summary: "Payout status (free)",
+          summary: "Fetch the status of a prepared naira payout",
           parameters: [
-            { name: "payoutId", in: "path", required: true, schema: { type: "string" } },
+            { name: "payoutId", in: "path", required: true, schema: { type: "string", pattern: "^[a-f0-9]{24}$" }, description: "payoutId returned by /prepare" },
             { name: "token", in: "query", required: true, schema: { type: "string" }, description: "From statusUrl" },
           ],
           responses: { "200": { description: "Status", content: { "application/json": { schema: { type: "object", properties: {
@@ -85,17 +85,17 @@ export function openApi(base: string, price: string) {
       },
       "/banks": {
         get: {
-          operationId: "list_banks", summary: "Search Nigerian banks (free)",
+          operationId: "list_banks", summary: "Search Nigerian banks and fintechs PayBot can pay into",
           parameters: [{ name: "search", in: "query", required: false, schema: { type: "string" }, example: "opay" }],
           responses: { "200": { description: "Banks", content: { "application/json": { schema: { type: "object" } } } } },
         },
       },
       "/quote": {
         get: {
-          operationId: "quote", summary: "Live naira payout rate (free)",
+          operationId: "quote", summary: "Fetch the live naira payout rate and a USDC estimate",
           parameters: [
-            { name: "ngn", in: "query", required: false, schema: { type: "number" } },
-            { name: "usdc", in: "query", required: false, schema: { type: "number" } },
+            { name: "ngn", in: "query", required: false, schema: { type: "number" }, description: "Naira amount to estimate the USDC cost for", example: 5000 },
+            { name: "usdc", in: "query", required: false, schema: { type: "number" }, description: "USDC amount to estimate the naira payout for", example: 10 },
           ],
           responses: { "200": { description: "Rate and estimate", content: { "application/json": { schema: { type: "object" } } } } },
         },
