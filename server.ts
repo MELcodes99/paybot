@@ -170,27 +170,57 @@ app.use("/plugin/*", async (c, next) => {
   c.header("Cache-Control", "no-store, max-age=0");
 });
 
+// PayBox gives a plugin call 10 seconds in total, and asking a bank who owns an account can take
+// longer. So the work runs here in the background: a call waits up to PLUGIN_WAIT_MS, and if the
+// bank has not answered yet it says "checking". Calling again with the same details picks up the
+// same job (it never creates a second payout) and returns the result once it is ready.
+const PLUGIN_WAIT_MS = Number(process.env.PLUGIN_WAIT_MS ?? 3_500);
+const prepareJobs = new Map<string, { at: number; done?: { payout?: any; error?: string }; promise: Promise<void> }>();
+const jobKey = (d: { bank: string; accountNumber: string; ngn: number; expectedName?: string }) =>
+  JSON.stringify([d.bank.trim().toLowerCase(), d.accountNumber.replace(/\D/g, ""), d.ngn, (d.expectedName ?? "").trim().toLowerCase()]);
+
 app.post("/plugin/prepare", async (c) => {
   const parsed = PrepareBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
     return c.json({ error: "Invalid request", issues: parsed.error.issues.slice(0, 5).map((i) => `${i.path.join(".")}: ${i.message}`), example: exampleBody }, 400);
   }
-  try {
-    const p = await createPayout(parsed.data);
-    await pluginStore.save({ payoutId: p.payoutId, accountName: p.accountName, bank: p.bank.name, accountNumber: p.accountNumber, ngn: p.ngn, usdc: p.usdc, address: p.address, createdAt: p.createdAt });
-    const naira = `N${p.ngn.toLocaleString("en-NG")}`;
-    return c.json({
-      payoutId: p.payoutId,
-      recipient: { accountName: p.accountName, bank: p.bank.name, accountNumber: p.accountNumber },
-      ngn: p.ngn,
-      usdc: p.usdc,
-      rate: p.rate ?? null,
-      expiresAt: new Date(Date.parse(p.createdAt) + QUOTE_TTL_MS).toISOString(),
-      confirm: `${p.accountName}, ${p.bank.name} ${p.accountNumber}. ${naira} costs ${p.usdc} USDC. Send it?`,
-    });
-  } catch (e: any) {
-    return c.json({ error: e?.message ?? String(e) }, 422);
+  for (const [k, j] of prepareJobs) if (Date.now() - j.at > 120_000) prepareJobs.delete(k);
+  const key = jobKey(parsed.data);
+  let job = prepareJobs.get(key);
+  if (!job) {
+    const fresh: { at: number; done?: { payout?: any; error?: string }; promise: Promise<void> } = { at: Date.now(), promise: Promise.resolve() };
+    fresh.promise = (async () => {
+      try {
+        const p = await createPayout(parsed.data);
+        await pluginStore.save({ payoutId: p.payoutId, accountName: p.accountName, bank: p.bank.name, accountNumber: p.accountNumber, ngn: p.ngn, usdc: p.usdc, address: p.address, createdAt: p.createdAt });
+        fresh.done = { payout: p };
+      } catch (e: any) {
+        fresh.done = { error: e?.message ?? String(e) };
+      }
+    })();
+    prepareJobs.set(key, fresh);
+    job = fresh;
   }
+  await Promise.race([job.promise, new Promise((r) => setTimeout(r, PLUGIN_WAIT_MS))]);
+  if (!job.done) {
+    return c.json({ status: "checking", note: "Still confirming the account with the bank. Call prepare_payout again with exactly the same details in a few seconds; it continues this request and never creates a second payout." }, 202);
+  }
+  if (job.done.error) {
+    prepareJobs.delete(key);
+    return c.json({ error: job.done.error }, 422);
+  }
+  const p = job.done.payout;
+  const naira = `N${p.ngn.toLocaleString("en-NG")}`;
+  return c.json({
+    status: "ready",
+    payoutId: p.payoutId,
+    recipient: { accountName: p.accountName, bank: p.bank.name, accountNumber: p.accountNumber },
+    ngn: p.ngn,
+    usdc: p.usdc,
+    rate: p.rate ?? null,
+    expiresAt: new Date(Date.parse(p.createdAt) + QUOTE_TTL_MS).toISOString(),
+    confirm: `${p.accountName}, ${p.bank.name} ${p.accountNumber}. ${naira} costs ${p.usdc} USDC. Send it?`,
+  });
 });
 
 app.get("/plugin/payout/:id", async (c) => {
@@ -296,6 +326,7 @@ if (TG_TOKEN && TG_SECRET && DB_URL && process.env.PAYBOT_NO_LISTEN !== "1") {
 }
 
 if (!SECRET) console.warn("[paybot] STATUS_SECRET not set: status links will not work.");
+if (process.env.PAYBOT_NO_LISTEN !== "1") banks().catch(() => {}); // warm the bank list cache
 if (process.env.PAYBOT_NO_LISTEN !== "1") {
   serve({ fetch: app.fetch, port: PORT }, () => console.log(`[paybot] ${BASE} (x402 ${paid ? "ON" : "OFF"}, facilitator ${USE_CDP ? "coinbase-cdp" : FACILITATOR}, telegram ${telegram})`));
 }
