@@ -19,6 +19,7 @@ import { landingPage, llmsTxt, openApi } from "./lib/site.ts";
 import { webhookCallback } from "grammy";
 import { postgresStore } from "./lib/bot-store.ts";
 import { createPaybot } from "./lib/telegram.ts";
+import { memoryPluginStore, postgresPluginStore, type PluginStore } from "./lib/plugin-store.ts";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const BASE = (process.env.PUBLIC_URL ?? `http://localhost:${PORT}`).replace(/\/$/, "");
@@ -149,6 +150,76 @@ app.post("/prepare", async (c) => {
   }
 });
 
+// ---------- PayBox plugin API ----------
+// The PayBot plugin runs inside PayBox. PayBox adds the x-paybot-plugin-key header (a brokered
+// secret set in the developer portal) to every plugin request to this host; nothing else has it.
+// The plugin never moves money itself: it returns an unsigned USDC transfer that the user approves
+// in PayBox with their passkey.
+
+const PLUGIN_KEY = process.env.PLUGIN_KEY?.trim() ?? "";
+const QUOTE_TTL_MS = 15 * 60_000;
+let pluginStore: PluginStore = memoryPluginStore();
+function pluginAuthorized(c: any) {
+  const given = Buffer.from(c.req.header("x-paybot-plugin-key") ?? "");
+  const want = Buffer.from(PLUGIN_KEY);
+  return PLUGIN_KEY.length >= 16 && given.length === want.length && timingSafeEqual(given, want);
+}
+app.use("/plugin/*", async (c, next) => {
+  if (!pluginAuthorized(c)) return c.json({ error: "Not authorized. This endpoint is for the PayBot PayBox plugin." }, 401);
+  await next();
+  c.header("Cache-Control", "no-store, max-age=0");
+});
+
+app.post("/plugin/prepare", async (c) => {
+  const parsed = PrepareBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ error: "Invalid request", issues: parsed.error.issues.slice(0, 5).map((i) => `${i.path.join(".")}: ${i.message}`), example: exampleBody }, 400);
+  }
+  try {
+    const p = await createPayout(parsed.data);
+    await pluginStore.save({ payoutId: p.payoutId, accountName: p.accountName, bank: p.bank.name, accountNumber: p.accountNumber, ngn: p.ngn, usdc: p.usdc, address: p.address, createdAt: p.createdAt });
+    const naira = `N${p.ngn.toLocaleString("en-NG")}`;
+    return c.json({
+      payoutId: p.payoutId,
+      recipient: { accountName: p.accountName, bank: p.bank.name, accountNumber: p.accountNumber },
+      ngn: p.ngn,
+      usdc: p.usdc,
+      rate: p.rate ?? null,
+      expiresAt: new Date(Date.parse(p.createdAt) + QUOTE_TTL_MS).toISOString(),
+      confirm: `${p.accountName}, ${p.bank.name} ${p.accountNumber}. ${naira} costs ${p.usdc} USDC. Send it?`,
+    });
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? String(e) }, 422);
+  }
+});
+
+app.get("/plugin/payout/:id", async (c) => {
+  const id = c.req.param("id");
+  if (!/^[a-f0-9]{24}$/i.test(id)) return c.json({ error: "Unknown payoutId" }, 404);
+  const p = await pluginStore.get(id);
+  if (!p) return c.json({ error: "Unknown payoutId. Prepare the payout with prepare_payout first." }, 404);
+  try {
+    const o = await getTransaction(loadSession(), id);
+    const expiresAt = Date.parse(p.createdAt) + QUOTE_TTL_MS;
+    const unchanged = o.address === p.address && Number(o.amount) === p.usdc && Number(o.fiatAmount) === p.ngn && o.mint === USDC_MINT;
+    return c.json({
+      payoutId: id,
+      recipient: { accountName: p.accountName, bank: p.bank, accountNumber: p.accountNumber },
+      ngn: p.ngn,
+      usdc: p.usdc,
+      status: o.status,
+      done: o.status === "COMPLETED",
+      payable: o.status === "INIT" && unchanged && Date.now() < expiresAt,
+      unchanged,
+      expiresAt: new Date(expiresAt).toISOString(),
+      pay: { to: p.address, mint: USDC_MINT, amount: toBaseUnits(p.usdc).toString(), decimals: 6 },
+      txSignature: o.signature || null,
+    });
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? String(e) }, 502);
+  }
+});
+
 // ---------- Free: status, banks, quote ----------
 
 // Status and rates change by the second: never let a browser, proxy or agent web reader cache them.
@@ -191,7 +262,7 @@ app.get("/quote", async (c) => {
 app.get("/", (c) => c.html(landingPage(BASE, PRICE)));
 app.get("/llms.txt", (c) => c.text(llmsTxt(BASE, PRICE)));
 app.get("/openapi.json", (c) => c.json(openApi(BASE, PRICE)));
-app.get("/health", (c) => c.json({ ok: true, service: "paybot", paid, telegram, facilitator: USE_CDP ? "coinbase-cdp" : FACILITATOR, networks: [PAY_TO_SOL && SVM_NET, PAY_TO_EVM && EVM_NET].filter(Boolean) }));
+app.get("/health", (c) => c.json({ ok: true, service: "paybot", paid, telegram, plugin: PLUGIN_KEY.length >= 16 ? "on" : "off", facilitator: USE_CDP ? "coinbase-cdp" : FACILITATOR, networks: [PAY_TO_SOL && SVM_NET, PAY_TO_EVM && EVM_NET].filter(Boolean) }));
 
 // ---------- Telegram bot (only when its settings exist) ----------
 
@@ -199,6 +270,10 @@ const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const TG_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
 const DB_URL = process.env.DATABASE_URL?.trim();
 let telegram = "off";
+if (DB_URL && process.env.PAYBOT_NO_LISTEN !== "1") {
+  try { pluginStore = await postgresPluginStore(DB_URL); }
+  catch (e: any) { console.error("[paybot] Plugin store failed to start, using memory:", e.message); }
+}
 if (TG_TOKEN && TG_SECRET && DB_URL && process.env.PAYBOT_NO_LISTEN !== "1") {
   try {
     const bot = createPaybot(TG_TOKEN, { store: await postgresStore(DB_URL) });
