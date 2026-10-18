@@ -17,5 +17,5 @@ const check = (name: string, cond: boolean, extra = "") => { ok &&= cond; consol
 const bad = await app.request("/telegram/s3cret", { method: "POST", headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": "wrong" }, body: JSON.stringify(update) });
 check("updates without Telegram's secret are rejected", bad.status === 401 && replies.length === 0, String(bad.status));
 const good = await app.request("/telegram/s3cret", { method: "POST", headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": "s3cret" }, body: JSON.stringify(update) });
-check("Telegram's updates reach the bot and it answers", good.status === 200 && replies[0]?.startsWith("PayBot sends naira"), String(good.status));
+check("Telegram's updates reach the bot and it answers", good.status === 200 && replies[0]?.includes("Welcome to PayBot") && replies[0]?.includes("/pay @username 5"), String(good.status));
 process.exit(ok ? 0 : 1);

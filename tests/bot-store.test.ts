@@ -39,6 +39,29 @@ await store.savePayout({ ...p, payoutId: "b".repeat(24), createdAt: new Date(Dat
 await store.savePayout({ ...p, payoutId: "c".repeat(24), telegramId: 2002 });
 const mine = await store.recentPayouts(1001, 5);
 check("history only shows your own payouts", mine.length === 2 && mine.every((x) => x.telegramId === 1001));
+// Handles for /pay
+await store.saveUser({ telegramId: 1001, conn, walletAddress: "3YWr" });
+await store.saveHandle(1001, "Mel_O", "Mel");
+check("handles are found by any case, with or without @", (await store.findHandle("@MEL_O"))?.telegramId === 1001 && (await store.findHandle("mel_o"))?.name === "Mel");
+await store.saveHandle(2002, "mel_o", "New Owner");
+check("a handle moves to whoever was seen with it last", (await store.findHandle("mel_o"))?.telegramId === 2002);
+await store.saveHandle(1001, "mel_new", "Mel");
+await store.saveHandle(3003, undefined, "No Username");
+check("people without a username are stored without one", (await store.findHandle("mel_new"))?.telegramId === 1001);
+
+// USDC transfers
+const t = { transferId: "d".repeat(24), fromId: 1001, toId: 2002, toHandle: "ada", fromAddress: "A", toAddress: "B", usdc: 2.5, chatId: 1001, createdAt: new Date().toISOString() };
+await store.saveTransfer(t);
+check("transfers round-trip", (await store.getTransfer(t.transferId))?.usdc === 2.5);
+await store.saveTransfer({ ...t, requestId: "tr-1" });
+let tRefused = "";
+try { await store.saveTransfer({ ...t, requestId: "tr-2" }); } catch (e: any) { tRefused = e.message; }
+check("the database refuses to replace a transfer's recorded PayBox request", tRefused.includes("Refusing") && (await store.getTransfer(t.transferId))?.requestId === "tr-1");
+check("the recipient doesn't see a payment until it succeeded", (await store.recentTransfers(2002, 5)).length === 0 && (await store.recentTransfers(1001, 5)).length === 1);
+await store.saveTransfer({ ...t, requestId: "tr-1", payboxStatus: "success" });
+check("then it shows up on both sides", (await store.recentTransfers(2002, 5)).length === 1 && (await store.recentTransfers(4004, 5)).length === 0);
+
 await store.deleteUser(1001);
 check("disconnect deletes the connection", !(await store.getUser(1001)));
+check("and removes the user from /pay lookups", !(await store.findHandle("mel_new")));
 process.exit(ok ? 0 : 1);

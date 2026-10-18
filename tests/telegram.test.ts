@@ -41,7 +41,9 @@ let updateId = 0;
 const msg = (from: number, text: string, chatId = from) => bot.handleUpdate({ update_id: ++updateId, message: { message_id: updateId, date: 0, chat: chatId < 0 ? { id: chatId, type: "group", title: "g" } : { id: chatId, type: "private", first_name: "x" }, from: { id: from, is_bot: false, first_name: "x" }, text, ...(text.startsWith("/") ? { entities: [{ type: "bot_command", offset: 0, length: text.split(" ")[0].length }] } : {}) } } as any);
 const tap = (from: number, data: string) => bot.handleUpdate({ update_id: ++updateId, callback_query: { id: String(updateId), from: { id: from, is_bot: false, first_name: "x" }, chat_instance: "ci", data, message: { message_id: 1, date: 0, chat: { id: from, type: "private", first_name: "x" }, text: "t" } } } as any);
 const settle = async () => { while (tasks.length) await tasks.shift(); };
-const texts = () => sent.filter((s) => s.method === "sendMessage" || s.method === "editMessageText").map((s) => s.payload.text as string);
+const plain = (s: string) => s.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+const texts = () => sent.filter((s) => s.method === "sendMessage" || s.method === "editMessageText").map((s) => plain(s.payload.text as string));
+const lastRaw = () => JSON.stringify(sent.filter((s) => s.method === "sendMessage").at(-1)?.payload ?? {});
 const last = () => texts().at(-1) ?? "";
 const lastMarkup = () => sent.filter((s) => s.method === "sendMessage").at(-1)?.payload.reply_markup;
 
@@ -59,7 +61,7 @@ const loginMsg = sent.find((s) => s.method === "sendMessage" && String(s.payload
 check("connect sends the PayBox link and login code", !!loginMsg && JSON.stringify(loginMsg.payload.reply_markup).includes("app.paybox.sh/connect"), loginMsg?.payload.text);
 await settle();
 check("then shows the 8 emoji to match", texts().some((t) => t.includes("🎧 🌈 🚂 🧢 🐬 💡 🛴 🎍")));
-check("then confirms the connected wallet and balance", last().includes("Connected. Wallet 3YWr...kZ8M: 10 USDC"), last());
+check("then confirms the connected wallet and balance", last().includes("Connected!") && last().includes("Wallet 3YWr...kZ8M") && last().includes("10 USDC"), last());
 const sealed = store.users.get(ME) ?? "";
 check("the stored connection is encrypted (no signing key in the database)", sealed.startsWith("v1.") && !sealed.includes("SECRETKEY") && !sealed.includes("rt"));
 check("a renewed PayBox login is saved", (await store.getUser(ME))?.conn.accessToken === "at2");
@@ -83,7 +85,7 @@ check("someone else tapping Confirm does nothing", calls.send.length === 0 && se
 await tap(ME, `c:${p1.payoutId}`);
 await settle();
 check("Confirm sends with this user's own PayBox client", calls.send.length === 1 && calls.send[0].client.id === "client-for-pbxk1.SECRETKEY" && calls.send[0].a.confirmedAccountName === "TUNDE BAKARE");
-check("and reports Done with the transaction link", last().startsWith("Done. N5,000 paid to TUNDE BAKARE") && last().includes("solscan"), last());
+check("and reports Done with the transaction link", last().includes("Done! N5,000 paid to TUNDE BAKARE") && lastRaw().includes("solscan"), last());
 
 store.payouts.set(p1.payoutId, { ...store.payouts.get(p1.payoutId)!, requestId: "req-1" });
 await tap(ME, `x:${p1.payoutId}`);

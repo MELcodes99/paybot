@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsx tests/units.test.ts && tsx tests/transfer-check.test.ts && tsx tests/paybox-client.test.ts && tsx tests/connect.test.ts && tsx tests/flow.test.ts && tsx tests/service.test.ts && tsx tests/paywall.test.ts && tsx tests/cdp-facilitator.test.ts && tsx tests/mcp-smoke.test.ts && tsx tests/parse-send.test.ts && tsx tests/bot-store.test.ts && tsx tests/telegram.test.ts && tsx tests/webhook.test.ts",
+    "test": "tsx tests/units.test.ts && tsx tests/transfer-check.test.ts && tsx tests/paybox-client.test.ts && tsx tests/connect.test.ts && tsx tests/flow.test.ts && tsx tests/service.test.ts && tsx tests/paywall.test.ts && tsx tests/cdp-facilitator.test.ts && tsx tests/mcp-smoke.test.ts && tsx tests/parse-send.test.ts && tsx tests/parse-pay.test.ts && tsx tests/p2p.test.ts && tsx tests/bot-store.test.ts && tsx tests/telegram.test.ts && tsx tests/pay-bot.test.ts && tsx tests/webhook.test.ts",
     "mcp": "tsx mcp.ts",
     "login": "tsx scripts/login.ts",
     "start": "tsx server.ts",

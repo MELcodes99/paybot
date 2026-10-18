@@ -171,14 +171,42 @@ If you typed a name and the bank says the account belongs to someone else, the b
 The bank says PALMPAY 8012345678 belongs to "ADA CHIOMA OKAFOR", not "ada okafor". Nothing was created.
 ```
 
+### 4. Pay another PayBot user by their @username
+
+Anyone who has connected their PayBox wallet to PayBot can be paid in USDC with just their Telegram username. The money goes wallet to wallet on Solana, from your PayBox wallet straight into theirs.
+
+```
+/pay @ada_okafor 5
+/pay @ada_okafor 2.5 for lunch
+pay @ada_okafor $5 thanks for the design
+```
+
+The bot shows who you're paying before anything moves:
+
+```
+💸 Confirm payment
+
+👤 To: Ada Okafor (@ada_okafor)
+💵 Amount: 2.5 USDC
+📝 Note: lunch
+👛 Their PayBox wallet: 7Jqs...o4LZ
+
+Only tap Confirm if this is the right person.    [ ✅ Confirm ]  [ ❌ Cancel ]
+```
+
+After you tap Confirm, you get a receipt with the Solscan link, and the recipient gets a message from the bot saying the money landed.
+
+If the person hasn't joined PayBot yet, nothing is sent and the bot gives you an **Invite them** button to share. Once they `/connect`, send your `/pay` again.
+
 ### Commands
 
 | Command | What it does |
 |---|---|
 | `/connect` | Link your PayBox wallet |
 | `/send` | Send naira, for example `/send 5000 GTBank 0123456789 Tunde Bakare` |
-| `/wallet` | Your USDC and SOL balance |
-| `/history` | Your last 5 payouts and their status |
+| `/pay` | Pay a PayBot user in USDC, for example `/pay @ada_okafor 5 for lunch` |
+| `/wallet` | Your USDC and SOL balance, and how friends can pay you |
+| `/history` | Your recent payouts and USDC payments, sent and received |
 | `/disconnect` | Delete your PayBox connection from PayBot |
 | `/help` | How PayBot works |
 
@@ -187,6 +215,7 @@ The bank says PALMPAY 8012345678 belongs to "ADA CHIOMA OKAFOR", not "ada okafor
 - **Quotes last 15 minutes.** If you tap Confirm later than that, the bot asks you to send the request again for a fresh rate.
 - **PayBox approval.** If your PayBox spending rules ask for approval, the bot says so. Approve the payment in the PayBox app, then tap **Check**.
 - **Private chats only.** The bot will not take payment requests in groups.
+- **Getting paid needs a username.** People find you by your Telegram @username. If you don't have one, set it in Telegram's settings.
 - **Low balance.** If your wallet cannot cover the payout or the network fee, the bot warns you before you confirm.
 - **Leaving.** `/disconnect` deletes your connection. To fully revoke access, also remove **PayBot Telegram** from the Clients screen in the PayBox app.
 
@@ -376,7 +405,10 @@ It is tested against tampered transactions: wrong amount, wrong recipient, a hid
 - Only the person who asked for a payout can confirm it. A Confirm tapped by anyone else does nothing.
 - Each person's actions run one at a time, so a double tap can never become two payments, and a payout that has been sent cannot be cancelled or replaced.
 - The database itself refuses to overwrite a payout's recorded PayBox request.
-- The same transaction check as the Claude Code version runs before every signature.
+- The same transaction check as the Claude Code version runs before every signature, for naira payouts and `/pay` alike.
+- For `/pay`, the recipient's wallet comes from their own PayBox connection, never from a chat message. Only connected people can be found by @username, and `/disconnect` removes you from the lookup.
+- Usernames can change hands, so before every `/pay` the bot asks Telegram who currently owns that @username. If it is no longer the person PayBot knew, it stops.
+- If the recipient disconnects or switches wallets between the confirm screen and the tap, the payment is cancelled and nothing is sent.
 - Telegram updates are accepted only on a secret path with Telegram's secret header.
 
 **Never holding funds**

@@ -311,12 +311,13 @@ if (TG_TOKEN && TG_SECRET && DB_URL && process.env.PAYBOT_NO_LISTEN !== "1") {
     app.post(`/telegram/${TG_SECRET}`, webhookCallback(bot, "hono", { secretToken: TG_SECRET, timeoutMilliseconds: 25_000 }));
     await bot.api.setWebhook(`${BASE}/telegram/${TG_SECRET}`, { secret_token: TG_SECRET, drop_pending_updates: false, allowed_updates: ["message", "callback_query"] });
     await bot.api.setMyCommands([
-      { command: "connect", description: "Link your PayBox wallet" },
-      { command: "send", description: "Send naira: /send 5000 GTBank 0123456789 Name" },
-      { command: "wallet", description: "Your balance" },
-      { command: "history", description: "Your recent payouts" },
-      { command: "disconnect", description: "Remove your PayBox connection" },
-      { command: "help", description: "How PayBot works" },
+      { command: "connect", description: "🔗 Link your PayBox wallet" },
+      { command: "pay", description: "💸 Pay a PayBot user in USDC: /pay @username 5" },
+      { command: "send", description: "🏦 Send naira: /send 5000 GTBank 0123456789 Name" },
+      { command: "wallet", description: "👛 Your balance" },
+      { command: "history", description: "📜 Your recent activity" },
+      { command: "disconnect", description: "🔌 Remove your PayBox connection" },
+      { command: "help", description: "👋 How PayBot works" },
     ]);
     telegram = "on";
   } catch (e: any) {

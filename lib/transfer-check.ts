@@ -1,6 +1,7 @@
 // Checks a PayBox Solana transfer plan BEFORE we sign it.
 // It only passes a transaction that pays exactly the expected USDC amount
-// from our wallet to the PAJ deposit address, with nothing else inside.
+// from our wallet to the expected recipient (a PAJ deposit address, or another
+// PayBot user's wallet for /pay), with nothing else inside.
 import { PublicKey, VersionedTransaction } from "@solana/web3.js";
 
 export const USDC_MINT_PK = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
@@ -53,9 +54,9 @@ export function checkTransferPlan(plan: any, expect: Expect): string[] {
       else fail("unexpected compute-budget instruction");
     } else if (pid.equals(ATA_PROGRAM)) {
       if (!acc[0].equals(sender) || !acc[1].equals(dstAta) || !acc[2].equals(recipient) || !acc[3].equals(USDC_MINT_PK)) {
-        fail("account-creation instruction is not for the PAJ address's USDC account");
+        fail("account-creation instruction is not for the recipient's USDC account");
       }
-      notes.push("Creates the PAJ address's USDC account (one-time rent, paid in SOL).");
+      notes.push("Creates the recipient's USDC account (one-time rent, paid in SOL).");
     } else if (pid.equals(TOKEN_PROGRAM)) {
       transfers++;
       if (d[0] === 12) { // TransferChecked: source, mint, destination, authority
