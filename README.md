@@ -265,6 +265,15 @@ Poll PayBox `get_request` with the same `request_id` until it is final. Never ca
 
 `ERROR` can appear briefly while PAJ retries. Keep polling. Never pay again.
 
+### Pay a Telegram user in USDC (with PayBox)
+
+Anyone who connected a PayBox wallet to the PayBot Telegram bot can be paid by their Telegram username from any PayBox agent (Claude, Grok and others):
+
+1. `use_service` POST `https://paybot-562g.onrender.com/telegram/resolve` with `{"username": "ada_okafor"}` ($0.01). Returns their PayBox Solana wallet and a `confirm` text. If they haven't connected, it answers 404 and you are not charged.
+2. Show the person the `confirm` text and the amount, and wait for a yes.
+3. `request_transfer` USDC on `solana:mainnet` to `address`, once (1 USDC = `1000000`).
+4. `use_service` POST `https://paybot-562g.onrender.com/telegram/notify` in `probe` mode (free) with `{"username", "signature", "note"}`. PayBot checks the payment on-chain, then tells the recipient on Telegram.
+
 ### With any x402 client
 
 `POST /prepare` is a standard x402 v2 endpoint. An unpaid request returns `402 Payment Required` with a `PAYMENT-REQUIRED` header offering:

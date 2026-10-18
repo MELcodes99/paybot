@@ -19,6 +19,7 @@ import { landingPage, llmsTxt, openApi } from "./lib/site.ts";
 import { webhookCallback } from "grammy";
 import { postgresStore } from "./lib/bot-store.ts";
 import { createPaybot } from "./lib/telegram.ts";
+import { cleanHandle, notifyTelegram, resolveTelegram, type TgDeps } from "./lib/tg-service.ts";
 import { memoryPluginStore, postgresPluginStore, type PluginStore } from "./lib/plugin-store.ts";
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -40,6 +41,10 @@ const DESCRIPTION = "PayBot: naira payouts to Nigerian bank and fintech accounts
 const SECRET = process.env.STATUS_SECRET || process.env.PAJ_API_KEY || "";
 
 const app = new Hono();
+// Set once the Telegram bot starts; the /telegram/* services need its users and its Telegram API.
+let tg: TgDeps | null = null;
+export function useTelegramForTests(d: TgDeps | null) { tg = d; }
+const RESOLVE_DESCRIPTION = "PayBot Telegram lookup: returns the PayBox Solana wallet that a Telegram user connected to the PayBot bot, checked against their current Telegram username, so USDC can be sent to a Telegram handle.";
 app.use("*", cors());
 
 // ---------- Request shapes ----------
@@ -103,6 +108,18 @@ if (paid) {
           required: ["bank", "accountNumber", "ngn"],
         },
         output: { example: { payoutId: "6ad0d2fb372552a19a9ff36c", recipient: { accountName: "TUNDE BAKARE", bank: "Guaranty Trust Bank", accountNumber: "0123456789" }, ngn: 5000, usdc: 3.69, pay: { chain: "solana:mainnet", token: USDC_MINT, to: "<PAJ deposit address>", amount: "3690000" } } },
+      } as any),
+    },
+    "POST /telegram/resolve": {
+      accepts,
+      ...(process.env.PUBLIC_URL ? { resource: `${BASE}/telegram/resolve` } : {}),
+      description: RESOLVE_DESCRIPTION,
+      mimeType: "application/json",
+      extensions: declareDiscoveryExtension({
+        bodyType: "json",
+        input: { username: "ada_okafor" },
+        inputSchema: { properties: { username: { type: "string", description: "Telegram username, with or without @" } }, required: ["username"] },
+        output: { example: { found: true, username: "ada_okafor", name: "Ada Okafor", chain: "solana:mainnet", token: USDC_MINT, address: "<recipient PayBox Solana wallet>" } },
       } as any),
     },
   } as any, server, undefined, undefined, process.env.X402_SYNC !== "0"));
@@ -250,6 +267,45 @@ app.get("/plugin/payout/:id", async (c) => {
   }
 });
 
+// ---------- Pay Telegram users from any PayBox agent ----------
+
+// Paid ($0.01 over x402, like /prepare). A miss answers 404 and is not charged.
+app.post("/telegram/resolve", async (c) => {
+  if (!tg) return c.json({ error: "The Telegram lookup is offline right now.", charged: false }, 503);
+  const body: any = await c.req.json().catch(() => null);
+  if (!cleanHandle(body?.username)) return c.json({ error: "Pass a Telegram username, e.g. {\"username\": \"ada_okafor\"}", charged: false }, 400);
+  try {
+    const r = await resolveTelegram(tg, body.username);
+    if (!r.found) return c.json({ ...r, charged: false }, 404);
+    return c.json({
+      ...r,
+      confirm: `Pay ${r.name ? `${r.name} (@${r.username})` : `@${r.username}`} on Telegram, PayBox wallet ${r.address.slice(0, 4)}...${r.address.slice(-4)}. Send it?`,
+      paybox: { tool: "request_transfer", args: { credential_id: "<your Solana wallet credential_id>", chain: "solana:mainnet", to: r.address, amount: "<USDC in base units, 6 decimals: 1 USDC = 1000000>", token: USDC_MINT } },
+      notify: { tool: "use_service", mode: "probe", method: "POST", url: `${BASE}/telegram/notify`, body: { username: r.username, signature: "<the transfer's Solana tx signature>", note: "<optional short note>" }, note: "Free. Tells the recipient on Telegram that the money arrived. Only works for a confirmed USDC payment into this wallet." },
+      rules: [
+        "Show the user the confirm text and the amount, and pay only after an explicit yes.",
+        "Pay USDC on Solana to address, once. Never resend if PayBox says processing or needs approval; poll get_request instead.",
+        "After the transfer succeeds, call notify with its tx signature.",
+      ],
+    });
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? String(e), charged: false }, 502);
+  }
+});
+
+// Free. Announces a payment to the recipient on Telegram after checking it on-chain.
+app.post("/telegram/notify", async (c) => {
+  if (limited(c)) return c.json({ error: "Slow down: 30 requests a minute." }, 429);
+  if (!tg) return c.json({ error: "The Telegram bot is offline right now." }, 503);
+  const body: any = await c.req.json().catch(() => ({}));
+  try {
+    const r = await notifyTelegram(tg, body ?? {});
+    return c.json(r, r.notified ? 200 : 422);
+  } catch (e: any) {
+    return c.json({ notified: false, reason: e?.message ?? String(e) }, 502);
+  }
+});
+
 // ---------- Free: status, banks, quote ----------
 
 // Status and rates change by the second: never let a browser, proxy or agent web reader cache them.
@@ -306,7 +362,8 @@ if (DB_URL && process.env.PAYBOT_NO_LISTEN !== "1") {
 }
 if (TG_TOKEN && TG_SECRET && DB_URL && process.env.PAYBOT_NO_LISTEN !== "1") {
   try {
-    const bot = createPaybot(TG_TOKEN, { store: await postgresStore(DB_URL) });
+    const store = await postgresStore(DB_URL);
+    const bot = createPaybot(TG_TOKEN, { store });
     // Secret path plus Telegram's secret header: only Telegram can deliver updates.
     app.post(`/telegram/${TG_SECRET}`, webhookCallback(bot, "hono", { secretToken: TG_SECRET, timeoutMilliseconds: 25_000 }));
     await bot.api.setWebhook(`${BASE}/telegram/${TG_SECRET}`, { secret_token: TG_SECRET, drop_pending_updates: false, allowed_updates: ["message", "callback_query"] });
@@ -319,6 +376,15 @@ if (TG_TOKEN && TG_SECRET && DB_URL && process.env.PAYBOT_NO_LISTEN !== "1") {
       { command: "disconnect", description: "🔌 Remove your PayBox connection" },
       { command: "help", description: "👋 How PayBot works" },
     ]);
+    await bot.init();
+    const announced = new Set<string>();
+    tg = {
+      store,
+      botUsername: bot.botInfo.username,
+      getChat: (id) => bot.api.getChat(id) as any,
+      sendMessage: (id, html) => bot.api.sendMessage(id, html, { parse_mode: "HTML", link_preview_options: { is_disabled: true } }),
+      notified: { has: (s) => announced.has(s), add: (s) => { announced.add(s); } },
+    };
     telegram = "on";
   } catch (e: any) {
     telegram = "error";

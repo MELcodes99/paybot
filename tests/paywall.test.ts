@@ -36,6 +36,11 @@ check("402 offers Base USDC $0.01 to your wallet", base?.amount === "10000" && b
 check("402 carries the bazaar discovery info", !!pr?.extensions?.bazaar, Object.keys(pr?.extensions ?? {}).join(","));
 check("402 advertises the public https address", pr?.resource?.url === "https://paybot.example/prepare", pr?.resource?.url);
 check("PAJ is never touched before payment", pajCalls === 0);
+const tr = await app.request("/telegram/resolve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "ada_okafor" }) });
+const tpr = tr.headers.get("payment-required") ? JSON.parse(Buffer.from(tr.headers.get("payment-required")!, "base64").toString()) : null;
+check("unpaid POST /telegram/resolve gets 402 for $0.01", tr.status === 402 && tpr?.accepts?.some((a: any) => a.network === SOL && a.amount === "10000") && tpr?.resource?.url === "https://paybot.example/telegram/resolve", String(tr.status));
+const notify = await app.request("/telegram/notify", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+check("POST /telegram/notify stays free", notify.status !== 402, String(notify.status));
 const free = await app.request("/openapi.json");
 check("free routes stay free", free.status === 200);
 process.exit(ok ? 0 : 1);

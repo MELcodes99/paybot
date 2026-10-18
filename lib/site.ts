@@ -9,7 +9,10 @@ const GUIDANCE = (base: string, price: string) =>
   `(3) Pay with PayBox request_transfer {credential_id: your Solana wallet, chain: "solana:mainnet", to: pay.to, amount: pay.amount, token: "${USDC_MINT}"}, exactly once, within 15 minutes. Poll get_request with the same request_id; never re-call request_transfer. ` +
   `(4) Check statusUrl until status is COMPLETED, using PayBox use_service with mode "probe" (free, live, never cached; plain web readers may show a stale page). ERROR can be temporary: keep checking, never pay again. ` +
   `Users usually ask in one line, e.g. "Send 5,000 naira to GTBank 0123456789, Tunde Bakare": map it to bank "GTBank", accountNumber "0123456789", ngn 5000, expectedName "Tunde Bakare". ` +
-  `Free helpers: GET ${base}/banks?search=opay and GET ${base}/quote?ngn=5000. The paying wallet needs about 0.0021 SOL for network fees.`;
+  `Free helpers: GET ${base}/banks?search=opay and GET ${base}/quote?ngn=5000. The paying wallet needs about 0.0021 SOL for network fees. ` +
+  `Paying a Telegram user in USDC ("send 2 USDC to @ada_okafor on Telegram"): (1) POST ${base}/telegram/resolve with {username} (${price} over x402; 404 and not charged if they haven't connected). It returns their PayBox Solana wallet address and a confirm text. ` +
+  `(2) Show the confirm text with the amount and wait for an explicit yes. (3) request_transfer {chain: "solana:mainnet", to: address, amount: USDC base units (1 USDC = 1000000), token: "${USDC_MINT}"} once; poll get_request. ` +
+  `(4) After success, POST ${base}/telegram/notify {username, signature: the tx signature, note?} with use_service mode "probe" (free) so the recipient is told on Telegram.`;
 
 export function openApi(base: string, price: string) {
   const amount = price.replace(/^\$/, "");
@@ -69,6 +72,31 @@ export function openApi(base: string, price: string) {
           },
         },
       },
+      "/telegram/resolve": {
+        post: {
+          operationId: "resolve_telegram",
+          summary: "Find the PayBox Solana wallet behind a Telegram username, to send it USDC",
+          description: `Only Telegram users who connected a PayBox wallet to the PayBot bot are found, and the username is checked against Telegram at request time. ${price} over x402; a miss returns 404 and is not charged.`,
+          "x-payment-info": { price: { amount: Number(amount).toFixed(6), currency: "USD" }, protocols: ["x402"] },
+          requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["username"], properties: { username: { type: "string", description: "Telegram username, with or without @", example: "ada_okafor" } } } } } },
+          responses: {
+            "200": { description: "Found", content: { "application/json": { schema: { type: "object", properties: {
+              found: { type: "boolean" }, username: { type: "string" }, name: { type: "string" }, chain: { type: "string" }, token: { type: "string" }, address: { type: "string" }, confirm: { type: "string" },
+            } } } } },
+            "402": { description: "Payment required (x402)" }, "404": err,
+          },
+        },
+      },
+      "/telegram/notify": {
+        post: {
+          operationId: "notify_telegram",
+          summary: "Tell a Telegram user their USDC arrived (free, checked on-chain)",
+          requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["username", "signature"], properties: {
+            username: { type: "string" }, signature: { type: "string", description: "Solana tx signature of the USDC payment" }, note: { type: "string", maxLength: 100 },
+          } } } } },
+          responses: { "200": { description: "Announced", content: { "application/json": { schema: { type: "object" } } } }, "422": err },
+        },
+      },
       "/status/{payoutId}": {
         get: {
           operationId: "payout_status",
@@ -123,6 +151,15 @@ export function llmsTxt(base: string, price: string) {
 "Send 5,000 naira to GTBank 0123456789, Tunde Bakare"
 -> bank: "GTBank", accountNumber: "0123456789", ngn: 5000, expectedName: "Tunde Bakare"
 Also common: "Pay Ada Okafor 20k on Opay 8012345678" (20k = 20000).
+
+## Pay a Telegram user in USDC (PayBox)
+1. use_service({ credential_id, url: "${base}/telegram/resolve", method: "POST", body: { "username": "ada_okafor" } })
+   Price: ${price} over x402. If they haven't connected a PayBox wallet to the PayBot Telegram bot: 404, not charged.
+2. Show the user the response's "confirm" text plus the amount. Wait for an explicit yes.
+3. request_transfer({ credential_id: <your Solana wallet>, chain: "solana:mainnet", to: address, amount: <USDC x 1000000>, token: "${USDC_MINT}" })
+   Once. Poll get_request with the same request_id until it is final.
+4. use_service({ credential_id, url: "${base}/telegram/notify", method: "POST", mode: "probe", body: { "username": "ada_okafor", "signature": <tx signature>, "note": "lunch" } })
+   Free. Tells them on Telegram that the money arrived.
 
 ## Free helpers
 - GET ${base}/banks?search=opay
